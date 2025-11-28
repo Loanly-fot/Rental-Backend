@@ -1,0 +1,487 @@
+{
+  "openapi": "3.0.0",
+  "info": {
+    "title": "Equipment Rental Management API",
+    "version": "1.0.0",
+    "description": "A comprehensive REST API for managing equipment rentals with user authentication, inventory management, and reporting.",
+    "contact": {
+      "name": "API Support",
+      "email": "support@rentalapi.com"
+    }
+  },
+  "servers": [
+    {
+      "url": "http://localhost:5000/api",
+      "description": "Local development server"
+    },
+    {
+      "url": "https://api.rental.com/api",
+      "description": "Production server"
+    }
+  ],
+  "tags": [
+    {
+      "name": "Authentication",
+      "description": "User registration and login"
+    },
+    {
+      "name": "Equipment",
+      "description": "Equipment management endpoints"
+    },
+    {
+      "name": "Rentals",
+      "description": "Rental checkout and return operations"
+    },
+    {
+      "name": "Reports",
+      "description": "Report generation and analytics"
+    }
+  ],
+  "components": {
+    "securitySchemes": {
+      "BearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
+        "description": "JWT Bearer token for API authentication"
+      }
+    },
+    "schemas": {
+      "User": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer"
+          },
+          "name": {
+            "type": "string"
+          },
+          "email": {
+            "type": "string",
+            "format": "email"
+          },
+          "role": {
+            "type": "string",
+            "enum": ["user", "admin"]
+          }
+        }
+      },
+      "Equipment": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer"
+          },
+          "name": {
+            "type": "string"
+          },
+          "category": {
+            "type": "string"
+          },
+          "qty_total": {
+            "type": "integer"
+          },
+          "qty_available": {
+            "type": "integer"
+          }
+        }
+      },
+      "Rental": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer"
+          },
+          "user_id": {
+            "type": "integer"
+          },
+          "equipment_id": {
+            "type": "integer"
+          },
+          "checkout_date": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "return_date": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "status": {
+            "type": "string",
+            "enum": ["active", "returned"]
+          }
+        }
+      },
+      "Error": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean"
+          },
+          "message": {
+            "type": "string"
+          },
+          "error": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  },
+  "paths": {
+    "/auth/register": {
+      "post": {
+        "tags": ["Authentication"],
+        "summary": "Register a new user",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "email": {
+                    "type": "string",
+                    "format": "email"
+                  },
+                  "password": {
+                    "type": "string"
+                  },
+                  "role": {
+                    "type": "string",
+                    "enum": ["user", "admin"],
+                    "default": "user"
+                  }
+                },
+                "required": ["name", "email", "password"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "User registered successfully"
+          },
+          "400": {
+            "description": "Validation error"
+          }
+        }
+      }
+    },
+    "/auth/login": {
+      "post": {
+        "tags": ["Authentication"],
+        "summary": "Login user",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "email": {
+                    "type": "string",
+                    "format": "email"
+                  },
+                  "password": {
+                    "type": "string"
+                  }
+                },
+                "required": ["email", "password"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Login successful"
+          },
+          "401": {
+            "description": "Invalid credentials"
+          }
+        }
+      }
+    },
+    "/equipment": {
+      "get": {
+        "tags": ["Equipment"],
+        "summary": "Get all equipment",
+        "responses": {
+          "200": {
+            "description": "List of all equipment"
+          }
+        }
+      },
+      "post": {
+        "tags": ["Equipment"],
+        "summary": "Create new equipment (Admin only)",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "category": {
+                    "type": "string"
+                  },
+                  "qty_total": {
+                    "type": "integer"
+                  },
+                  "qty_available": {
+                    "type": "integer"
+                  }
+                },
+                "required": ["name", "category", "qty_total", "qty_available"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Equipment created successfully"
+          },
+          "403": {
+            "description": "Admin access required"
+          }
+        }
+      }
+    },
+    "/equipment/{id}": {
+      "get": {
+        "tags": ["Equipment"],
+        "summary": "Get equipment by ID",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Equipment details"
+          },
+          "404": {
+            "description": "Equipment not found"
+          }
+        }
+      },
+      "put": {
+        "tags": ["Equipment"],
+        "summary": "Update equipment (Admin only)",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "category": {
+                    "type": "string"
+                  },
+                  "qty_total": {
+                    "type": "integer"
+                  },
+                  "qty_available": {
+                    "type": "integer"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Equipment updated successfully"
+          },
+          "403": {
+            "description": "Admin access required"
+          }
+        }
+      },
+      "delete": {
+        "tags": ["Equipment"],
+        "summary": "Delete equipment (Admin only)",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Equipment deleted successfully"
+          },
+          "403": {
+            "description": "Admin access required"
+          }
+        }
+      }
+    },
+    "/rentals/checkout": {
+      "post": {
+        "tags": ["Rentals"],
+        "summary": "Checkout equipment",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "equipment_id": {
+                    "type": "integer"
+                  },
+                  "return_date": {
+                    "type": "string",
+                    "format": "date-time"
+                  }
+                },
+                "required": ["equipment_id", "return_date"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Equipment checked out successfully"
+          },
+          "400": {
+            "description": "Equipment not available"
+          }
+        }
+      }
+    },
+    "/rentals/return": {
+      "post": {
+        "tags": ["Rentals"],
+        "summary": "Return equipment",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "rental_id": {
+                    "type": "integer"
+                  }
+                },
+                "required": ["rental_id"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Equipment returned successfully"
+          },
+          "404": {
+            "description": "Rental not found"
+          }
+        }
+      }
+    },
+    "/reports/summary": {
+      "get": {
+        "tags": ["Reports"],
+        "summary": "Get report summary",
+        "responses": {
+          "200": {
+            "description": "Report summary with key metrics"
+          }
+        }
+      }
+    },
+    "/reports/daily/pdf": {
+      "get": {
+        "tags": ["Reports"],
+        "summary": "Download daily rental report (PDF)",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "PDF report generated"
+          },
+          "403": {
+            "description": "Admin access required"
+          }
+        }
+      }
+    },
+    "/reports/monthly/pdf": {
+      "get": {
+        "tags": ["Reports"],
+        "summary": "Download monthly rental report (PDF)",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "PDF report generated"
+          },
+          "403": {
+            "description": "Admin access required"
+          }
+        }
+      }
+    }
+  }
+}
