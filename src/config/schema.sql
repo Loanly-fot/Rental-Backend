@@ -33,18 +33,23 @@ CREATE TABLE IF NOT EXISTS equipment (
   CONSTRAINT check_qty CHECK (qty_available <= qty_total)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- Rentals table
+-- Rentals table (UPDATED – clean version)
 CREATE TABLE IF NOT EXISTS rentals (
   id INT AUTO_INCREMENT PRIMARY KEY,
   user_id INT NOT NULL,
   equipment_id INT NOT NULL,
   checkout_date DATETIME NOT NULL,
   return_date DATETIME NOT NULL,
+  quantity INT NOT NULL DEFAULT 1,
+  total_cost DECIMAL(10,2) NOT NULL DEFAULT 0.00,
   status ENUM('active', 'returned') DEFAULT 'active',
+
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE ON UPDATE CASCADE,
   FOREIGN KEY (equipment_id) REFERENCES equipment(id) ON DELETE CASCADE ON UPDATE CASCADE,
+
   INDEX idx_user_id (user_id),
   INDEX idx_equipment_id (equipment_id),
   INDEX idx_status (status),
@@ -65,18 +70,18 @@ CREATE TABLE IF NOT EXISTS logs (
   INDEX idx_action_length (action(100))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- Insert sample admin user (password: admin123 hashed with bcrypt)
+
+-- Sample admin + users
 INSERT INTO users (name, email, password_hash, role) VALUES 
 ('Admin User', 'admin@rental.com', '$2b$10$YourHashedPasswordHere', 'admin')
 ON DUPLICATE KEY UPDATE password_hash=VALUES(password_hash);
 
--- Insert sample users
 INSERT INTO users (name, email, password_hash, role) VALUES 
 ('John Doe', 'john@example.com', '$2b$10$YourHashedPasswordHere', 'user'),
 ('Jane Smith', 'jane@example.com', '$2b$10$YourHashedPasswordHere', 'user')
 ON DUPLICATE KEY UPDATE password_hash=VALUES(password_hash);
 
--- Insert sample equipment
+-- Sample equipment
 INSERT INTO equipment (name, description, category, daily_rate, qty_total, qty_available) VALUES 
 ('Laptop Dell XPS', 'High performance laptop with 16GB RAM', 'Electronics', 50.00, 10, 10),
 ('Projector Epson', '4K projector for presentations', 'Electronics', 75.00, 5, 5),
@@ -87,6 +92,8 @@ INSERT INTO equipment (name, description, category, daily_rate, qty_total, qty_a
 ('Microphone Shure', 'Professional microphone', 'Audio', 40.00, 8, 8),
 ('Video Tripod', 'Heavy duty video tripod', 'Photography', 35.00, 12, 12)
 ON DUPLICATE KEY UPDATE qty_available=VALUES(qty_available);
+
+
 
 -- Create views for common queries
 CREATE OR REPLACE VIEW active_rentals AS

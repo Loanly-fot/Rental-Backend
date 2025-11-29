@@ -6,92 +6,72 @@ const Log = require("../models/Log");
 // Checkout equipment
 exports.checkout = async (req, res) => {
   try {
-    const { equipment_id, return_date } = req.body;
+    const { equipment_id, return_date, quantity = 1 } = req.body; // optional quantity
     const user_id = req.user?.id;
 
-    // Validate input
     if (!equipment_id || !return_date) {
-      return res.status(400).json({
-        success: false,
-        message: "Equipment ID and return date are required",
-      });
+      return res.status(400).json({ success: false, message: "Equipment ID and return date are required" });
     }
 
     if (!user_id) {
-      return res.status(401).json({
-        success: false,
-        message: "User authentication required",
-      });
+      return res.status(401).json({ success: false, message: "User authentication required" });
     }
 
-    // Check if equipment exists
     const equipment = await Equipment.findById(equipment_id);
-    if (!equipment) {
-      return res.status(404).json({
-        success: false,
-        message: "Equipment not found",
-      });
+    if (!equipment) return res.status(404).json({ success: false, message: "Equipment not found" });
+
+    if (equipment.qty_available < quantity) {
+      return res.status(400).json({ success: false, message: "Not enough equipment available" });
     }
 
-    // Check availability
-    if (equipment.qty_available < 1) {
-      return res.status(400).json({
-        success: false,
-        message: "Equipment is not available for checkout",
-      });
-    }
-
-    // Validate return date
+    const checkout_date = new Date();
     const returnDateObj = new Date(return_date);
-    const today = new Date();
-    if (returnDateObj <= today) {
-      return res.status(400).json({
-        success: false,
-        message: "Return date must be in the future",
-      });
+    if (returnDateObj <= checkout_date) {
+      return res.status(400).json({ success: false, message: "Return date must be in the future" });
     }
+
+    const timeDiff = returnDateObj.getTime() - checkout_date.getTime();
+    const days = Math.ceil(timeDiff / (1000 * 60 * 60 * 24)); // number of days
+    const totalCost = equipment.daily_rate * days * quantity;
 
     // Create rental record
-    const checkout_date = new Date();
-    const rentalId = await Rental.create(
+    const rental = await Rental.create(
       user_id,
       equipment_id,
       checkout_date,
       return_date,
-      "active"
+      "active",
+      quantity,
+      totalCost
     );
 
-    // Update equipment available quantity
-    const newQtyAvailable = equipment.qty_available - 1;
-    await Equipment.updateAvailableQty(equipment_id, newQtyAvailable);
+    await Equipment.updateAvailableQty(equipment_id, equipment.qty_available - quantity);
 
-    // Log action
-    await Log.create(
-      user_id,
-      `Checked out equipment: ${equipment.name} (ID: ${equipment_id})`
-    );
+    await Log.create(user_id, `Checked out equipment: ${equipment.name} (ID: ${equipment_id})`);
 
     res.status(201).json({
       success: true,
       message: "Equipment checked out successfully",
       rental: {
-        id: rentalId,
+        id: rental.id, // assuming Rental.create returns the object
         equipment_id,
         equipment_name: equipment.name,
-        checkout_date,
-        return_date,
+        startDate: checkout_date,
+        endDate: return_date,
         status: "active",
+        quantity,
+        totalCost, // fixed
+        customerName: req.user?.name,
+        customerEmail: req.user?.email,
       },
     });
   } catch (error) {
     console.error("Checkout error:", error);
-    res.status(500).json({
-      success: false,
-      message: "Error checking out equipment",
-      error: error.message,
-    });
+    res.status(500).json({ success: false, message: "Error checking out equipment", error: error.message });
   }
 };
+
+
 
 // Return equipment
 exports.returnEquipment = async (req, res) => {
@@ -99,80 +79,47 @@ exports.returnEquipment = async (req, res) => {
     const { rental_id } = req.body;
     const user_id = req.user?.id;
 
-    // Validate input
     if (!rental_id) {
-      return res.status(400).json({
-        success: false,
-        message: "Rental ID is required",
-      });
+      return res.status(400).json({ success: false, message: "Rental ID is required" });
     }
 
     if (!user_id) {
-      return res.status(401).json({
-        success: false,
-        message: "User authentication required",
-      });
+      return res.status(401).json({ success: false, message: "User authentication required" });
     }
 
-    // Check if rental exists
     const rental = await Rental.findById(rental_id);
     if (!rental) {
-      return res.status(404).json({
-        success: false,
-        message: "Rental not found",
-      });
+      return res.status(404).json({ success: false, message: "Rental not found" });
     }
 
-    // Check if rental belongs to user or user is admin
     if (rental.user_id !== user_id && req.user?.role !== "admin") {
-      return res.status(403).json({
-        success: false,
-        message: "You do not have permission to return this rental",
-      });
+      return res.status(403).json({ success: false, message: "You do not have permission to return this rental" });
     }
 
-    // Check if rental is already returned
     if (rental.status === "returned") {
-      return res.status(400).json({
-        success: false,
-        message: "Equipment has already been returned",
-      });
+      return res.status(400).json({ success: false, message: "Equipment has already been returned" });
     }
 
-    // Get equipment
     const equipment = await Equipment.findById(rental.equipment_id);
     if (!equipment) {
-      return res.status(404).json({
-        success: false,
-        message: "Equipment not found",
-      });
+      return res.status(404).json({ success: false, message: "Equipment not found" });
     }
 
-    // Update rental status
     const updated = await Rental.updateStatus(rental_id, "returned");
-
     if (!updated) {
-      return res.status(400).json({
-        success: false,
-        message: "Failed to return equipment",
-      });
+      return res.status(400).json({ success: false, message: "Failed to return equipment" });
     }
 
-    // Update equipment available quantity
-    const newQtyAvailable = equipment.qty_available + 1;
-    await Equipment.updateAvailableQty(rental.equipment_id, newQtyAvailable);
+    // Add back the rented quantity
+    await Equipment.updateAvailableQty(rental.equipment_id, equipment.qty_available + rental.quantity);
 
-    // Check if return is overdue
     const returnDateObj = new Date(rental.return_date);
     const today = new Date();
     const isOverdue = today > returnDateObj;
 
-    // Log action
     await Log.create(
       user_id,
-      `Returned equipment: ${equipment.name} (ID: ${rental.equipment_id})${
-        isOverdue ? " - OVERDUE" : ""
-      }`
+      `Returned equipment: ${equipment.name} (ID: ${rental.equipment_id})${isOverdue ? " - OVERDUE" : ""}`
     );
 
     res.status(200).json({
@@ -182,21 +129,20 @@ exports.returnEquipment = async (req, res) => {
         id: rental_id,
         equipment_id: rental.equipment_id,
         equipment_name: equipment.name,
-        checkout_date: rental.checkout_date,
-        return_date: rental.return_date,
+        startDate: rental.checkout_date,
+        endDate: rental.return_date,
         status: "returned",
+        quantity: rental.quantity,
+        totalCost: rental.total_cost,
         isOverdue,
       },
     });
   } catch (error) {
     console.error("Return equipment error:", error);
-    res.status(500).json({
-      success: false,
-      message: "Error returning equipment",
-      error: error.message,
-    });
+    res.status(500).json({ success: false, message: "Error returning equipment", error: error.message });
   }
 };
+
 
 // Get all rentals
 exports.getAll = async (req, res) => {

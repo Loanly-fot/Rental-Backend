@@ -2,14 +2,15 @@ const pool = require("../config/db");
 
 class User {
   // Create a new user
-  static async create(name, email, passwordHash, role = "user") {
+  static async create(name, email, passwordHash, role = "user",phone = "") {
     const query =
-      "INSERT INTO users (name, email, password_hash, role) VALUES (?, ?, ?, ?)";
+      "INSERT INTO users (name, email, password_hash, role, phone) VALUES (?, ?, ?, ?, ?)";
     const [result] = await pool.execute(query, [
       name,
       email,
       passwordHash,
       role,
+      phone
     ]);
     return result.insertId;
   }
@@ -17,7 +18,7 @@ class User {
   // Get user by ID
   static async findById(id) {
     const query =
-      "SELECT id, name, email, password_hash, role FROM users WHERE id = ?";
+      "SELECT id, name, email, password_hash, role, phone FROM users WHERE id = ?";
     const [rows] = await pool.execute(query, [id]);
     return rows.length > 0 ? rows[0] : null;
   }
@@ -25,7 +26,7 @@ class User {
   // Get user by email
   static async findByEmail(email) {
     const query =
-      "SELECT id, name, email, password_hash, role FROM users WHERE email = ?";
+      "SELECT id, name, email, password_hash, role, phone FROM users WHERE email = ?";
     const [rows] = await pool.execute(query, [email]);
     return rows.length > 0 ? rows[0] : null;
   }

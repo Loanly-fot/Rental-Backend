@@ -6,7 +6,7 @@ require("dotenv").config();
 // Register a new user
 exports.register = async (req, res) => {
   try {
-    const { name, email, password, role } = req.body;
+    const { name, email, password, role, phone } = req.body;
 
     // Validate input
     if (!name || !email || !password) {
@@ -33,7 +33,8 @@ exports.register = async (req, res) => {
       name,
       email,
       hashedPassword,
-      role || "user"
+      role || "user",
+      phone
     );
 
     // Generate JWT token
@@ -51,6 +52,7 @@ exports.register = async (req, res) => {
         id: userId,
         name,
         email,
+        phone,
         role: role || "user",
       },
     });
@@ -142,6 +144,7 @@ exports.getCurrentUser = async (req, res) => {
         id: user.id,
         name: user.name,
         email: user.email,
+        phone: user.phone,
         role: user.role,
       },
     });
