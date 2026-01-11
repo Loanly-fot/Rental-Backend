@@ -248,8 +248,11 @@ exports.getAllUsers = async (req, res) => {
         id: user._id,
         name: user.name,
         email: user.email,
+        phone: user.phone || null,
+        address: user.address || null,
         role: user.role,
         createdAt: user.createdAt,
+        updatedAt: user.updatedAt,
       })),
     });
   } catch (error) {
@@ -302,7 +305,7 @@ exports.getUserById = async (req, res) => {
 exports.updateUser = async (req, res) => {
   try {
     const { id } = req.params;
-    const { name, role } = req.body;
+    const { name, role, phone, address } = req.body;
 
     // Prevent admin from changing their own role
     if (role && req.user.id === id) {
@@ -320,9 +323,22 @@ exports.updateUser = async (req, res) => {
       });
     }
 
+    // Validate phone if provided
+    if (phone) {
+      const phoneRegex = /^[\d\s()+-]+$/;
+      if (!phoneRegex.test(phone)) {
+        return res.status(400).json({
+          success: false,
+          message: "Please enter a valid phone number",
+        });
+      }
+    }
+
     const update = {};
     if (typeof name === "string" && name.trim().length > 0) update.name = name;
     if (role) update.role = role;
+    if (phone) update.phone = phone;
+    if (address) update.address = address;
 
     const user = await User.findByIdAndUpdate(id, update, {
       new: true,
@@ -342,6 +358,8 @@ exports.updateUser = async (req, res) => {
         id: user._id,
         name: user.name,
         email: user.email,
+        phone: user.phone || null,
+        address: user.address || null,
         role: user.role,
         createdAt: user.createdAt,
       },
@@ -420,6 +438,117 @@ exports.resetUserPassword = async (req, res) => {
     res.status(500).json({
       success: false,
       message: "Error resetting password",
+      error: error.message,
+    });
+  }
+};
+
+// Create Admin (Admin only)
+exports.createAdmin = async (req, res) => {
+  try {
+    const { name, email, password, phone, address } = req.body;
+
+    // Validate required fields
+    if (!name || !email || !password) {
+      return res.status(400).json({
+        success: false,
+        message: "Name, email, and password are required",
+      });
+    }
+
+    // Validate email format
+    const emailRegex = /^\S+@\S+\.\S+$/;
+    if (!emailRegex.test(email)) {
+      return res.status(400).json({
+        success: false,
+        message: "Please enter a valid email",
+      });
+    }
+
+    // Validate password length
+    if (password.length < 6) {
+      return res.status(400).json({
+        success: false,
+        message: "Password must be at least 6 characters",
+      });
+    }
+
+    // Check if admin already exists with this email
+    const existingUser = await User.findOne({ email: email.toLowerCase() });
+    if (existingUser) {
+      return res.status(400).json({
+        success: false,
+        message: "User already exists with this email",
+      });
+    }
+
+    // Validate phone if provided
+    if (phone) {
+      const phoneRegex = /^[\d\s()+-]+$/;
+      if (!phoneRegex.test(phone)) {
+        return res.status(400).json({
+          success: false,
+          message: "Please enter a valid phone number",
+        });
+      }
+    }
+
+    // Create admin user
+    const admin = await User.create({
+      name,
+      email: email.toLowerCase(),
+      password,
+      role: "admin", // Force admin role
+      phone: phone || undefined,
+      address: address || undefined,
+    });
+
+    res.status(201).json({
+      success: true,
+      message: "Admin created successfully",
+      admin: {
+        id: admin._id,
+        name: admin.name,
+        email: admin.email,
+        role: admin.role,
+        phone: admin.phone,
+        address: admin.address,
+        createdAt: admin.createdAt,
+      },
+    });
+  } catch (error) {
+    console.error("Create admin error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Error creating admin",
+      error: error.message,
+    });
+  }
+};
+
+// Get all admins (Admin only)
+exports.getAllAdmins = async (req, res) => {
+  try {
+    const admins = await User.find({ role: "admin" }).select("-password");
+
+    res.status(200).json({
+      success: true,
+      count: admins.length,
+      admins: admins.map((admin) => ({
+        id: admin._id,
+        name: admin.name,
+        email: admin.email,
+        role: admin.role,
+        phone: admin.phone,
+        address: admin.address,
+        createdAt: admin.createdAt,
+      })),
+    });
+  } catch (error) {
+    console.error("Get all admins error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Error fetching admins",
       error: error.message,
     });
   }

@@ -16,6 +16,12 @@ router.post("/change-password", verifyToken, authController.changePassword);
 router.get("/users", verifyToken, verifyAdmin, authController.getAllUsers);
 router.get("/users/:id", verifyToken, verifyAdmin, authController.getUserById);
 router.patch("/users/:id", verifyToken, verifyAdmin, authController.updateUser);
+router.post(
+  "/users/:id/update",
+  verifyToken,
+  verifyAdmin,
+  authController.updateUser
+); // Alternative POST route
 router.delete(
   "/users/:id",
   verifyToken,
@@ -28,5 +34,14 @@ router.patch(
   verifyAdmin,
   authController.resetUserPassword
 );
+
+// Admin management routes
+router.post(
+  "/admin/create",
+  verifyToken,
+  verifyAdmin,
+  authController.createAdmin
+);
+router.get("/admins", verifyToken, verifyAdmin, authController.getAllAdmins);
 
 module.exports = router;
