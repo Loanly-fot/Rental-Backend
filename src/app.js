@@ -1,7 +1,9 @@
 const express = require("express");
 const cors = require("cors");
+const path = require("path");
 const swaggerUi = require("swagger-ui-express");
 const swaggerDocument = require("./swagger.json");
+const connectDB = require("./config/db");
 const {
   requestLogger,
   errorLogger,
@@ -13,9 +15,15 @@ const authRoutes = require("./routes/authRoutes");
 const equipmentRoutes = require("./routes/equipmentRoutes");
 const rentalRoutes = require("./routes/rentalRoutes");
 const reportRoutes = require("./routes/reportRoutes");
+const dashboardRoutes = require("./routes/dashboardRoutes");
+const deliveryRoutes = require("./routes/deliveryRoutes");
+const paymentRoutes = require("./routes/paymentRoutes");
 
 // Initialize Express app
 const app = express();
+
+// Connect to MongoDB
+connectDB();
 
 // Middleware
 app.use(
@@ -29,6 +37,9 @@ app.use(
 
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ limit: "10mb", extended: true }));
+
+// Serve static files (uploaded images)
+app.use("/uploads", express.static(path.join(__dirname, "../public/uploads")));
 
 // Logging middleware
 app.use(requestDurationLogger);
@@ -60,6 +71,9 @@ app.use("/api/auth", authRoutes);
 app.use("/api/equipment", equipmentRoutes);
 app.use("/api/rentals", rentalRoutes);
 app.use("/api/reports", reportRoutes);
+app.use("/api/dashboard", dashboardRoutes);
+app.use("/api/deliveries", deliveryRoutes);
+app.use("/api/payments", paymentRoutes);
 
 // Root endpoint
 app.get("/", (req, res) => {

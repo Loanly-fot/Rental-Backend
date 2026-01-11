@@ -4,40 +4,29 @@ const { verifyToken, verifyAdmin } = require("../middleware/authMiddleware");
 
 const router = express.Router();
 
-// Protected routes
-router.post("/checkout", verifyToken, rentalController.checkout);
-router.post("/return", verifyToken, rentalController.returnEquipment);
-
-// Get user's own rentals
-router.get("/user/active", verifyToken, rentalController.getUserActiveRentals);
-router.get("/user/all", verifyToken, rentalController.getUserRentals);
-
-// Admin routes
+// Admin routes - get all rentals
 router.get("/", verifyToken, verifyAdmin, rentalController.getAll);
-router.get(
-  "/admin/overdue",
+
+// User routes - get own rentals (must come before /:id)
+router.get("/me", verifyToken, rentalController.getMyRentals);
+
+// Get rental by ID (user can view own, admin can view all)
+router.get("/:id", verifyToken, rentalController.getRentalById);
+
+// Create rental
+router.post("/:equipmentId", verifyToken, rentalController.createRental);
+
+// Update rental status (Admin)
+router.put(
+  "/:id/status",
   verifyToken,
   verifyAdmin,
-  rentalController.getOverdue
+  rentalController.updateStatus
 );
-router.get(
-  "/admin/active",
-  verifyToken,
-  verifyAdmin,
-  rentalController.getActive
-);
-router.get(
-  "/equipment/:equipment_id",
-  verifyToken,
-  verifyAdmin,
-  rentalController.getByEquipmentId
-);
-router.get(
-  "/admin/user/:user_id",
-  verifyToken,
-  verifyAdmin,
-  rentalController.getByUserId
-);
-router.get("/:id", verifyToken, rentalController.getById);
+
+// Cancel rental (User can cancel their own)
+router.post("/:id/cancel", verifyToken, rentalController.cancelRental);
+
+module.exports = router;
 
 module.exports = router;

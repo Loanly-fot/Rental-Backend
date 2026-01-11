@@ -30,7 +30,7 @@ exports.requestLogger = async (req, res, next) => {
 
       // Log to database asynchronously (non-blocking)
       if (userId) {
-        Log.create(userId, action).catch((error) => {
+        Log.create({ userId, action }).catch((error) => {
           console.error("Error logging request:", error);
         });
       }

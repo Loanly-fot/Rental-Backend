@@ -4,73 +4,20 @@ const { verifyToken, verifyAdmin } = require("../middleware/authMiddleware");
 
 const router = express.Router();
 
-// Public summary (optional auth)
-router.get("/summary", reportController.getReportSummary);
-
-// Protected routes (admin only)
+// Admin reports
+router.get("/admin", verifyToken, verifyAdmin, reportController.getAdminReport);
 router.get(
-  "/daily/csv",
+  "/admin/csv",
   verifyToken,
   verifyAdmin,
-  reportController.getDailyRentalReportCSV
-);
-router.get(
-  "/daily/pdf",
-  verifyToken,
-  verifyAdmin,
-  reportController.getDailyRentalReportPDF
+  reportController.getAdminCSV
 );
 
-router.get(
-  "/monthly/csv",
-  verifyToken,
-  verifyAdmin,
-  reportController.getMonthlyRentalReportCSV
-);
-router.get(
-  "/monthly/pdf",
-  verifyToken,
-  verifyAdmin,
-  reportController.getMonthlyRentalReportPDF
-);
+// User reports
+router.get("/user", verifyToken, reportController.getUserReport);
+router.get("/user/csv", verifyToken, reportController.getUserCSV);
 
-router.get(
-  "/inventory/csv",
-  verifyToken,
-  verifyAdmin,
-  reportController.getInventoryReportCSV
-);
-router.get(
-  "/inventory/pdf",
-  verifyToken,
-  verifyAdmin,
-  reportController.getInventoryReportPDF
-);
-
-router.get(
-  "/activity/csv",
-  verifyToken,
-  verifyAdmin,
-  reportController.getActivityLogReportCSV
-);
-router.get(
-  "/activity/pdf",
-  verifyToken,
-  verifyAdmin,
-  reportController.getActivityLogReportPDF
-);
-
-router.get(
-  "/overdue/csv",
-  verifyToken,
-  verifyAdmin,
-  reportController.getOverdueReportCSV
-);
-router.get(
-  "/overdue/pdf",
-  verifyToken,
-  verifyAdmin,
-  reportController.getOverdueReportPDF
-);
+// Activity logs (Admin only)
+router.get("/logs", verifyToken, verifyAdmin, reportController.getActivityLogs);
 
 module.exports = router;

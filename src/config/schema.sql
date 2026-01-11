@@ -26,10 +26,18 @@ CREATE TABLE IF NOT EXISTS equipment (
   daily_rate DECIMAL(10, 2) DEFAULT 0.00,
   qty_total INT NOT NULL CHECK (qty_total > 0),
   qty_available INT NOT NULL CHECK (qty_available >= 0),
+  status ENUM('pending', 'approved', 'rejected') DEFAULT 'approved',
+  uploaded_by INT,
+  approved_by INT,
+  approval_notes TEXT,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  FOREIGN KEY (uploaded_by) REFERENCES users(id) ON DELETE SET NULL ON UPDATE CASCADE,
+  FOREIGN KEY (approved_by) REFERENCES users(id) ON DELETE SET NULL ON UPDATE CASCADE,
   INDEX idx_category (category),
   INDEX idx_availability (qty_available),
+  INDEX idx_status (status),
+  INDEX idx_uploaded_by (uploaded_by),
   CONSTRAINT check_qty CHECK (qty_available <= qty_total)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
@@ -81,17 +89,17 @@ INSERT INTO users (name, email, password_hash, role) VALUES
 ('Jane Smith', 'jane@example.com', '$2b$10$YourHashedPasswordHere', 'user')
 ON DUPLICATE KEY UPDATE password_hash=VALUES(password_hash);
 
--- Sample equipment
-INSERT INTO equipment (name, description, category, daily_rate, qty_total, qty_available) VALUES 
-('Laptop Dell XPS', 'High performance laptop with 16GB RAM', 'Electronics', 50.00, 10, 10),
-('Projector Epson', '4K projector for presentations', 'Electronics', 75.00, 5, 5),
-('Whiteboard Standard', 'Standard whiteboard 4x8 ft', 'Office', 10.00, 20, 20),
-('Conference Chair', 'Ergonomic conference chair', 'Furniture', 25.00, 30, 30),
-('Standing Desk', 'Adjustable standing desk', 'Furniture', 30.00, 15, 15),
-('Camera Canon EOS', 'Professional DSLR camera', 'Photography', 80.00, 3, 3),
-('Microphone Shure', 'Professional microphone', 'Audio', 40.00, 8, 8),
-('Video Tripod', 'Heavy duty video tripod', 'Photography', 35.00, 12, 12)
-ON DUPLICATE KEY UPDATE qty_available=VALUES(qty_available);
+-- Sample equipment (all marked as approved by admin)
+INSERT INTO equipment (name, description, category, daily_rate, qty_total, qty_available, status, uploaded_by, approved_by) VALUES 
+('Laptop Dell XPS', 'High performance laptop with 16GB RAM', 'Electronics', 50.00, 10, 10, 'approved', 1, 1),
+('Projector Epson', '4K projector for presentations', 'Electronics', 75.00, 5, 5, 'approved', 1, 1),
+('Whiteboard Standard', 'Standard whiteboard 4x8 ft', 'Office', 10.00, 20, 20, 'approved', 1, 1),
+('Conference Chair', 'Ergonomic conference chair', 'Furniture', 25.00, 30, 30, 'approved', 1, 1),
+('Standing Desk', 'Adjustable standing desk', 'Furniture', 30.00, 15, 15, 'approved', 1, 1),
+('Camera Canon EOS', 'Professional DSLR camera', 'Photography', 80.00, 3, 3, 'approved', 1, 1),
+('Microphone Shure', 'Professional microphone', 'Audio', 40.00, 8, 8, 'approved', 1, 1),
+('Video Tripod', 'Heavy duty video tripod', 'Photography', 35.00, 12, 12, 'approved', 1, 1)
+ON DUPLICATE KEY UPDATE qty_available=VALUES(qty_available), status=VALUES(status), uploaded_by=VALUES(uploaded_by), approved_by=VALUES(approved_by);
 
 
 

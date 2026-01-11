@@ -1,63 +1,79 @@
-const pool = require("../config/db");
+const mongoose = require("mongoose");
+const bcrypt = require("bcryptjs");
 
-class User {
-  // Create a new user
-  static async create(name, email, passwordHash, role = "user",phone = "") {
-    const query =
-      "INSERT INTO users (name, email, password_hash, role, phone) VALUES (?, ?, ?, ?, ?)";
-    const [result] = await pool.execute(query, [
-      name,
-      email,
-      passwordHash,
-      role,
-      phone
-    ]);
-    return result.insertId;
+const userSchema = new mongoose.Schema(
+  {
+    name: {
+      type: String,
+      required: [true, "Name is required"],
+      trim: true,
+    },
+    email: {
+      type: String,
+      required: [true, "Email is required"],
+      unique: true,
+      lowercase: true,
+      trim: true,
+      match: [/^\S+@\S+\.\S+$/, "Please enter a valid email"],
+    },
+    password: {
+      type: String,
+      required: [true, "Password is required"],
+      minlength: [6, "Password must be at least 6 characters"],
+      select: false, // Don't include password in queries by default
+    },
+    role: {
+      type: String,
+      enum: ["admin", "user", "delivery"],
+      default: "user",
+    },
+    phone: {
+      type: String,
+      trim: true,
+      match: [/^[\d\s()+-]+$/, "Please enter a valid phone number"],
+    },
+    address: {
+      type: String,
+      trim: true,
+    },
+  },
+  {
+    timestamps: true, // Adds createdAt and updatedAt
+  }
+);
+
+// Hash password before saving
+userSchema.pre("save", async function (next) {
+  if (!this.isModified("password")) {
+    return next();
   }
 
-  // Get user by ID
-  static async findById(id) {
-    const query =
-      "SELECT id, name, email, password_hash, role, phone FROM users WHERE id = ?";
-    const [rows] = await pool.execute(query, [id]);
-    return rows.length > 0 ? rows[0] : null;
+  try {
+    const salt = await bcrypt.genSalt(10);
+    this.password = await bcrypt.hash(this.password, salt);
+    next();
+  } catch (error) {
+    next(error);
   }
+});
 
-  // Get user by email
-  static async findByEmail(email) {
-    const query =
-      "SELECT id, name, email, password_hash, role, phone FROM users WHERE email = ?";
-    const [rows] = await pool.execute(query, [email]);
-    return rows.length > 0 ? rows[0] : null;
+// Method to compare password
+userSchema.methods.comparePassword = async function (candidatePassword) {
+  try {
+    return await bcrypt.compare(candidatePassword, this.password);
+  } catch (error) {
+    throw new Error(error);
   }
+};
 
-  // Get all users
-  static async findAll() {
-    const query = "SELECT id, name, email, role FROM users";
-    const [rows] = await pool.execute(query);
-    return rows;
-  }
+// Method to get user without password
+userSchema.methods.toJSON = function () {
+  const user = this.toObject();
+  delete user.password;
+  delete user.__v;
+  return user;
+};
 
-  // Update user
-  static async update(id, name, email, role) {
-    const query = "UPDATE users SET name = ?, email = ?, role = ? WHERE id = ?";
-    const [result] = await pool.execute(query, [name, email, role, id]);
-    return result.affectedRows > 0;
-  }
-
-  // Delete user
-  static async delete(id) {
-    const query = "DELETE FROM users WHERE id = ?";
-    const [result] = await pool.execute(query, [id]);
-    return result.affectedRows > 0;
-  }
-
-  // Check if user exists
-  static async exists(email) {
-    const query = "SELECT id FROM users WHERE email = ?";
-    const [rows] = await pool.execute(query, [email]);
-    return rows.length > 0;
-  }
-}
+const User = mongoose.model("User", userSchema);
 
 module.exports = User;

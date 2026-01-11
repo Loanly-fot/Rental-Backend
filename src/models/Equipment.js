@@ -1,104 +1,83 @@
-const pool = require("../config/db");
+const mongoose = require("mongoose");
 
-class Equipment {
-  // Create new equipment
-  static async create(
-    name,
-    description,
-    category,
-    dailyRate,
-    qtyTotal,
-    qtyAvailable
-  ) {
-    const query =
-      "INSERT INTO equipment (name, description, category, daily_rate, qty_total, qty_available) VALUES (?, ?, ?, ?, ?, ?)";
-    const [result] = await pool.execute(query, [
-      name,
-      description,
-      category,
-      dailyRate,
-      qtyTotal,
-      qtyAvailable,
-    ]);
-    return result.insertId;
+const equipmentSchema = new mongoose.Schema(
+  {
+    name: {
+      type: String,
+      required: [true, "Equipment name is required"],
+      trim: true,
+    },
+    category: {
+      type: String,
+      enum: [
+        "Power Tools",
+        "Hand Tools",
+        "Outdoor Equipment",
+        "Cleaning Equipment",
+        "Safety Equipment",
+        "Measuring Equipment",
+        "Others",
+      ],
+      required: [true, "Category is required"],
+    },
+    customCategory: {
+      type: String,
+      trim: true,
+      // Used when category is "Others"
+    },
+    description: {
+      type: String,
+      trim: true,
+    },
+    quantity: {
+      type: Number,
+      required: [true, "Quantity is required"],
+      min: [0, "Quantity cannot be negative"],
+      default: 0,
+    },
+    dailyRate: {
+      type: Number,
+      min: [0, "Daily rate cannot be negative"],
+      default: 0,
+    },
+    status: {
+      type: String,
+      enum: ["available", "maintenance", "retired"],
+      default: "available",
+    },
+    createdBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+    },
+    approved: {
+      type: Boolean,
+      default: false,
+    },
+    approvedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+    },
+    approvalNotes: {
+      type: String,
+      trim: true,
+    },
+    image: {
+      type: String,
+      trim: true,
+      // Stores filename (e.g., "equipment-1234567890.jpg")
+    },
+  },
+  {
+    timestamps: true, // Adds createdAt and updatedAt
   }
+);
 
-  // Get equipment by ID
-  static async findById(id) {
-    const query =
-      "SELECT id, name, description, category, daily_rate, qty_total, qty_available FROM equipment WHERE id = ?";
-    const [rows] = await pool.execute(query, [id]);
-    return rows.length > 0 ? rows[0] : null;
-  }
+// Index for faster queries
+equipmentSchema.index({ status: 1 });
+equipmentSchema.index({ category: 1 });
+equipmentSchema.index({ createdBy: 1 });
+equipmentSchema.index({ approved: 1 });
 
-  // Get all equipment
-  static async findAll() {
-    const query =
-      "SELECT id, name, description, category, daily_rate, qty_total, qty_available FROM equipment";
-    const [rows] = await pool.execute(query);
-    return rows;
-  }
-
-  // Get equipment by category
-  static async findByCategory(category) {
-    const query =
-      "SELECT id, name, description, category, daily_rate, qty_total, qty_available FROM equipment WHERE category = ?";
-    const [rows] = await pool.execute(query, [category]);
-    return rows;
-  }
-
-  // Update equipment
-  static async update(
-    id,
-    name,
-    description,
-    category,
-    dailyRate,
-    qtyTotal,
-    qtyAvailable
-  ) {
-    const query =
-      "UPDATE equipment SET name = ?, description = ?, category = ?, daily_rate = ?, qty_total = ?, qty_available = ? WHERE id = ?";
-    const [result] = await pool.execute(query, [
-      name,
-      description,
-      category,
-      dailyRate,
-      qtyTotal,
-      qtyAvailable,
-      id,
-    ]);
-    return result.affectedRows > 0;
-  }
-
-  // Update available quantity
-  static async updateAvailableQty(id, qtyAvailable) {
-    const query = "UPDATE equipment SET qty_available = ? WHERE id = ?";
-    const [result] = await pool.execute(query, [qtyAvailable, id]);
-    return result.affectedRows > 0;
-  }
-
-  // Delete equipment
-  static async delete(id) {
-    const query = "DELETE FROM equipment WHERE id = ?";
-    const [result] = await pool.execute(query, [id]);
-    return result.affectedRows > 0;
-  }
-
-  // Check available quantity
-  static async checkAvailability(id, qty) {
-    const query = "SELECT qty_available FROM equipment WHERE id = ?";
-    const [rows] = await pool.execute(query, [id]);
-    if (rows.length === 0) return false;
-    return rows[0].qty_available >= qty;
-  }
-
-  // Get all categories
-  static async getCategories() {
-    const query = "SELECT DISTINCT category FROM equipment ORDER BY category";
-    const [rows] = await pool.execute(query);
-    return rows;
-  }
-}
+const Equipment = mongoose.model("Equipment", equipmentSchema);
 
 module.exports = Equipment;

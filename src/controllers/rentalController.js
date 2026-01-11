@@ -3,156 +3,38 @@ const Equipment = require("../models/Equipment");
 const User = require("../models/User");
 const Log = require("../models/Log");
 
-// Checkout equipment
-exports.checkout = async (req, res) => {
-  try {
-    const { equipment_id, return_date, quantity = 1 } = req.body; // optional quantity
-    const user_id = req.user?.id;
-
-    if (!equipment_id || !return_date) {
-      return res.status(400).json({ success: false, message: "Equipment ID and return date are required" });
-    }
-
-    if (!user_id) {
-      return res.status(401).json({ success: false, message: "User authentication required" });
-    }
-
-    const equipment = await Equipment.findById(equipment_id);
-    if (!equipment) return res.status(404).json({ success: false, message: "Equipment not found" });
-
-    if (equipment.qty_available < quantity) {
-      return res.status(400).json({ success: false, message: "Not enough equipment available" });
-    }
-
-    const checkout_date = new Date();
-    const returnDateObj = new Date(return_date);
-    if (returnDateObj <= checkout_date) {
-      return res.status(400).json({ success: false, message: "Return date must be in the future" });
-    }
-
-    const timeDiff = returnDateObj.getTime() - checkout_date.getTime();
-    const days = Math.ceil(timeDiff / (1000 * 60 * 60 * 24)); // number of days
-    const totalCost = equipment.daily_rate * days * quantity;
-
-    // Create rental record
-    const rental = await Rental.create(
-      user_id,
-      equipment_id,
-      checkout_date,
-      return_date,
-      "active",
-      quantity,
-      totalCost
-    );
-
-    await Equipment.updateAvailableQty(equipment_id, equipment.qty_available - quantity);
-
-    await Log.create(user_id, `Checked out equipment: ${equipment.name} (ID: ${equipment_id})`);
-
-    res.status(201).json({
-      success: true,
-      message: "Equipment checked out successfully",
-      rental: {
-        id: rental.id, // assuming Rental.create returns the object
-        equipment_id,
-        equipment_name: equipment.name,
-        startDate: checkout_date,
-        endDate: return_date,
-        status: "active",
-        quantity,
-        totalCost, // fixed
-        customerName: req.user?.name,
-        customerEmail: req.user?.email,
-      },
-    });
-  } catch (error) {
-    console.error("Checkout error:", error);
-    res.status(500).json({ success: false, message: "Error checking out equipment", error: error.message });
-  }
-};
-
-
-
-// Return equipment
-exports.returnEquipment = async (req, res) => {
-  try {
-    const { rental_id } = req.body;
-    const user_id = req.user?.id;
-
-    if (!rental_id) {
-      return res.status(400).json({ success: false, message: "Rental ID is required" });
-    }
-
-    if (!user_id) {
-      return res.status(401).json({ success: false, message: "User authentication required" });
-    }
-
-    const rental = await Rental.findById(rental_id);
-    if (!rental) {
-      return res.status(404).json({ success: false, message: "Rental not found" });
-    }
-
-    if (rental.user_id !== user_id && req.user?.role !== "admin") {
-      return res.status(403).json({ success: false, message: "You do not have permission to return this rental" });
-    }
-
-    if (rental.status === "returned") {
-      return res.status(400).json({ success: false, message: "Equipment has already been returned" });
-    }
-
-    const equipment = await Equipment.findById(rental.equipment_id);
-    if (!equipment) {
-      return res.status(404).json({ success: false, message: "Equipment not found" });
-    }
-
-    const updated = await Rental.updateStatus(rental_id, "returned");
-    if (!updated) {
-      return res.status(400).json({ success: false, message: "Failed to return equipment" });
-    }
-
-    // Add back the rented quantity
-    await Equipment.updateAvailableQty(rental.equipment_id, equipment.qty_available + rental.quantity);
-
-    const returnDateObj = new Date(rental.return_date);
-    const today = new Date();
-    const isOverdue = today > returnDateObj;
-
-    await Log.create(
-      user_id,
-      `Returned equipment: ${equipment.name} (ID: ${rental.equipment_id})${isOverdue ? " - OVERDUE" : ""}`
-    );
-
-    res.status(200).json({
-      success: true,
-      message: "Equipment returned successfully",
-      rental: {
-        id: rental_id,
-        equipment_id: rental.equipment_id,
-        equipment_name: equipment.name,
-        startDate: rental.checkout_date,
-        endDate: rental.return_date,
-        status: "returned",
-        quantity: rental.quantity,
-        totalCost: rental.total_cost,
-        isOverdue,
-      },
-    });
-  } catch (error) {
-    console.error("Return equipment error:", error);
-    res.status(500).json({ success: false, message: "Error returning equipment", error: error.message });
-  }
-};
-
-
-// Get all rentals
+// Get all rentals (Admin only)
 exports.getAll = async (req, res) => {
   try {
-    const rentals = await Rental.findAllWithDetails();
+    const { limit } = req.query;
+    let query = Rental.find()
+      .populate("equipmentId", "name category dailyRate")
+      .populate("userId", "name email")
+      .sort({ createdAt: -1 });
+
+    if (limit) {
+      query = query.limit(parseInt(limit));
+    }
+
+    const rentals = await query;
 
     res.status(200).json({
       success: true,
       count: rentals.length,
-      rentals,
+      rentals: rentals.map((rental) => ({
+        id: rental._id,
+        equipmentId: rental.equipmentId?._id,
+        equipmentName: rental.equipmentId?.name,
+        userId: rental.userId?._id,
+        userName: rental.userId?.name,
+        status: rental.status,
+        startDate: rental.startDate,
+        endDate: rental.endDate,
+        quantity: rental.quantity,
+        totalCost: rental.totalCost,
+        notes: rental.notes,
+        createdAt: rental.createdAt,
+      })),
     });
   } catch (error) {
     console.error("Get all rentals error:", error);
@@ -164,15 +46,226 @@ exports.getAll = async (req, res) => {
   }
 };
 
+// Get current user's rentals
+exports.getMyRentals = async (req, res) => {
+  try {
+    const userId = req.user.id;
+
+    const rentals = await Rental.find({ userId })
+      .populate("equipmentId", "name category dailyRate")
+      .sort({ createdAt: -1 });
+
+    res.status(200).json({
+      success: true,
+      count: rentals.length,
+      rentals: rentals.map((rental) => ({
+        id: rental._id,
+        equipmentName: rental.equipmentId?.name,
+        status: rental.status,
+        startDate: rental.startDate,
+        endDate: rental.endDate,
+        quantity: rental.quantity,
+        totalCost: rental.totalCost,
+        notes: rental.notes,
+        createdAt: rental.createdAt,
+      })),
+    });
+  } catch (error) {
+    console.error("Get my rentals error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Error fetching rentals",
+      error: error.message,
+    });
+  }
+};
+
 // Get rental by ID
-exports.getById = async (req, res) => {
+exports.getRentalById = async (req, res) => {
   try {
     const { id } = req.params;
+    const userId = req.user.id;
+    const isAdmin = req.user.role === "admin";
 
-    if (!id) {
+    const rental = await Rental.findById(id)
+      .populate("equipmentId", "name category description dailyRate")
+      .populate("userId", "name email phone");
+
+    if (!rental) {
+      return res.status(404).json({
+        success: false,
+        message: "Rental not found",
+      });
+    }
+
+    // Check ownership
+    if (!isAdmin && rental.userId._id.toString() !== userId) {
+      return res.status(403).json({
+        success: false,
+        message: "You can only view your own rentals",
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      rental: {
+        id: rental._id,
+        equipmentId: rental.equipmentId?._id,
+        equipmentName: rental.equipmentId?.name,
+        equipmentCategory: rental.equipmentId?.category,
+        equipmentDescription: rental.equipmentId?.description,
+        dailyRate: rental.equipmentId?.dailyRate,
+        userId: rental.userId?._id,
+        userName: rental.userId?.name,
+        userEmail: rental.userId?.email,
+        userPhone: rental.userId?.phone,
+        status: rental.status,
+        startDate: rental.startDate,
+        endDate: rental.endDate,
+        quantity: rental.quantity,
+        totalCost: rental.totalCost,
+        notes: rental.notes,
+        createdAt: rental.createdAt,
+        updatedAt: rental.updatedAt,
+      },
+    });
+  } catch (error) {
+    console.error("Get rental by ID error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Error fetching rental",
+      error: error.message,
+    });
+  }
+};
+
+// Create a rental (User)
+exports.createRental = async (req, res) => {
+  try {
+    const { equipmentId } = req.params;
+    const { notes, startDate, endDate, quantity } = req.body;
+    const userId = req.user.id;
+
+    // Validate required fields
+    if (!startDate || !endDate) {
       return res.status(400).json({
         success: false,
-        message: "Rental ID is required",
+        message: "Start date and end date are required",
+      });
+    }
+
+    // Validate dates
+    const start = new Date(startDate);
+    const end = new Date(endDate);
+
+    if (start >= end) {
+      return res.status(400).json({
+        success: false,
+        message: "End date must be after start date",
+      });
+    }
+
+    // Check if equipment exists and is available
+    const equipment = await Equipment.findById(equipmentId);
+
+    if (!equipment) {
+      return res.status(404).json({
+        success: false,
+        message: "Equipment not found",
+      });
+    }
+
+    if (equipment.status !== "available") {
+      return res.status(400).json({
+        success: false,
+        message: `Equipment is not available (status: ${equipment.status})`,
+      });
+    }
+
+    // Check if equipment has enough quantity
+    const rentalQuantity = quantity || 1;
+    if (equipment.quantity < rentalQuantity) {
+      return res.status(400).json({
+        success: false,
+        message: "Not enough equipment quantity available",
+      });
+    }
+
+    // Calculate total cost
+    const days = Math.ceil((end - start) / (1000 * 60 * 60 * 24));
+    const totalCost = days * equipment.dailyRate * rentalQuantity;
+
+    // Create rental
+    const rental = await Rental.create({
+      equipmentId,
+      userId,
+      startDate: start,
+      endDate: end,
+      notes: notes || "",
+      quantity: rentalQuantity,
+      totalCost,
+      status: "pending",
+    });
+
+    // Log action
+    await Log.create({
+      userId,
+      action: `Created rental for equipment: ${equipment.name}`,
+    });
+
+    const populatedRental = await Rental.findById(rental._id)
+      .populate("equipmentId", "name category")
+      .populate("userId", "name email");
+
+    res.status(201).json({
+      success: true,
+      message: "Rental created successfully",
+      rental: {
+        id: populatedRental._id,
+        equipmentName: populatedRental.equipmentId?.name,
+        status: populatedRental.status,
+        startDate: populatedRental.startDate,
+        endDate: populatedRental.endDate,
+        quantity: populatedRental.quantity,
+        totalCost: populatedRental.totalCost,
+        notes: populatedRental.notes,
+      },
+    });
+  } catch (error) {
+    console.error("Create rental error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Error creating rental",
+      error: error.message,
+    });
+  }
+};
+
+// Update rental status (Admin)
+exports.updateStatus = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status } = req.body;
+    const userId = req.user.id;
+
+    if (!status) {
+      return res.status(400).json({
+        success: false,
+        message: "Status is required",
+      });
+    }
+
+    const validStatuses = [
+      "pending",
+      "approved",
+      "active",
+      "completed",
+      "cancelled",
+    ];
+    if (!validStatuses.includes(status)) {
+      return res.status(400).json({
+        success: false,
+        message: `Invalid status. Must be one of: ${validStatuses.join(", ")}`,
       });
     }
 
@@ -185,171 +278,83 @@ exports.getById = async (req, res) => {
       });
     }
 
+    rental.status = status;
+    await rental.save();
+
+    // Log action
+    await Log.create({
+      userId,
+      action: `Updated rental ${id} status to ${status}`,
+    });
+
     res.status(200).json({
       success: true,
-      rental,
+      message: "Rental status updated successfully",
+      rental: {
+        id: rental._id,
+        status: rental.status,
+      },
     });
   } catch (error) {
-    console.error("Get rental by ID error:", error);
+    console.error("Update rental status error:", error);
     res.status(500).json({
       success: false,
-      message: "Error fetching rental",
+      message: "Error updating rental status",
       error: error.message,
     });
   }
 };
 
-// Get active rentals
-exports.getActive = async (req, res) => {
+// Cancel rental (User can cancel their own)
+exports.cancelRental = async (req, res) => {
   try {
-    const rentals = await Rental.findActive();
+    const { id } = req.params;
+    const userId = req.user.id;
+    const userRole = req.user.role;
 
-    res.status(200).json({
-      success: true,
-      count: rentals.length,
-      rentals,
-    });
-  } catch (error) {
-    console.error("Get active rentals error:", error);
-    res.status(500).json({
-      success: false,
-      message: "Error fetching active rentals",
-      error: error.message,
-    });
-  }
-};
+    const rental = await Rental.findById(id);
 
-// Get user's rentals
-exports.getUserRentals = async (req, res) => {
-  try {
-    const user_id = req.user?.id;
-
-    if (!user_id) {
-      return res.status(401).json({
+    if (!rental) {
+      return res.status(404).json({
         success: false,
-        message: "User authentication required",
+        message: "Rental not found",
       });
     }
 
-    const rentals = await Rental.findByUserId(user_id);
-
-    res.status(200).json({
-      success: true,
-      count: rentals.length,
-      rentals,
-    });
-  } catch (error) {
-    console.error("Get user rentals error:", error);
-    res.status(500).json({
-      success: false,
-      message: "Error fetching user rentals",
-      error: error.message,
-    });
-  }
-};
-
-// Get user's active rentals
-exports.getUserActiveRentals = async (req, res) => {
-  try {
-    const user_id = req.user?.id;
-
-    if (!user_id) {
-      return res.status(401).json({
+    // Check if user owns this rental (unless admin)
+    if (userRole !== "admin" && rental.userId.toString() !== userId) {
+      return res.status(403).json({
         success: false,
-        message: "User authentication required",
+        message: "You can only cancel your own rentals",
       });
     }
 
-    const rentals = await Rental.findActiveByUserId(user_id);
-
-    res.status(200).json({
-      success: true,
-      count: rentals.length,
-      rentals,
-    });
-  } catch (error) {
-    console.error("Get user active rentals error:", error);
-    res.status(500).json({
-      success: false,
-      message: "Error fetching user active rentals",
-      error: error.message,
-    });
-  }
-};
-
-// Get overdue rentals
-exports.getOverdue = async (req, res) => {
-  try {
-    const rentals = await Rental.findOverdue();
-
-    res.status(200).json({
-      success: true,
-      count: rentals.length,
-      rentals,
-    });
-  } catch (error) {
-    console.error("Get overdue rentals error:", error);
-    res.status(500).json({
-      success: false,
-      message: "Error fetching overdue rentals",
-      error: error.message,
-    });
-  }
-};
-
-// Get rentals by equipment ID
-exports.getByEquipmentId = async (req, res) => {
-  try {
-    const { equipment_id } = req.params;
-
-    if (!equipment_id) {
+    // Check if rental can be cancelled
+    if (rental.status === "completed" || rental.status === "cancelled") {
       return res.status(400).json({
         success: false,
-        message: "Equipment ID is required",
+        message: `Cannot cancel rental with status: ${rental.status}`,
       });
     }
 
-    const rentals = await Rental.findByEquipmentId(equipment_id);
+    rental.status = "cancelled";
+    await rental.save();
+
+    // Log action
+    await Log.create({
+      userId,
+      action: `Cancelled rental ${id}`,
+    });
 
     res.status(200).json({
       success: true,
-      count: rentals.length,
-      rentals,
+      message: "Rental cancelled successfully",
     });
   } catch (error) {
-    console.error("Get rentals by equipment ID error:", error);
+    console.error("Cancel rental error:", error);
     res.status(500).json({
       success: false,
-      message: "Error fetching rentals",
-      error: error.message,
-    });
-  }
-};
-
-// Get rentals by user ID (admin only)
-exports.getByUserId = async (req, res) => {
-  try {
-    const { user_id } = req.params;
-
-    if (!user_id) {
-      return res.status(400).json({
-        success: false,
-        message: "User ID is required",
-      });
-    }
-
-    const rentals = await Rental.findByUserId(user_id);
-
-    res.status(200).json({
-      success: true,
-      count: rentals.length,
-      rentals,
-    });
-  } catch (error) {
-    console.error("Get rentals by user ID error:", error);
-    res.status(500).json({
-      success: false,
-      message: "Error fetching rentals",
+      message: "Error cancelling rental",
       error: error.message,
     });
   }

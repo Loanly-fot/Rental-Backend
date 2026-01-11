@@ -1,12 +1,11 @@
-const bcrypt = require("bcrypt");
-const jwt = require("jsonwebtoken");
 const User = require("../models/User");
+const generateToken = require("../utils/generateToken");
 require("dotenv").config();
 
 // Register a new user
 exports.register = async (req, res) => {
   try {
-    const { name, email, password, role, phone } = req.body;
+    const { name, email, password, role, phone, address } = req.body;
 
     // Validate input
     if (!name || !email || !password) {
@@ -16,44 +15,59 @@ exports.register = async (req, res) => {
       });
     }
 
+    // Validate password length
+    if (password.length < 6) {
+      return res.status(400).json({
+        success: false,
+        message: "Password must be at least 6 characters",
+      });
+    }
+
     // Check if user already exists
-    const userExists = await User.exists(email);
-    if (userExists) {
+    const existingUser = await User.findOne({ email: email.toLowerCase() });
+    if (existingUser) {
       return res.status(400).json({
         success: false,
         message: "User already exists with this email",
       });
     }
 
-    // Hash password
-    const hashedPassword = await bcrypt.hash(password, 10);
+    // Validate role if provided
+    if (role && !["admin", "user", "delivery"].includes(role)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid role. Must be 'admin', 'user', or 'delivery'",
+      });
+    }
 
-    // Create user
-    const userId = await User.create(
+    // Create user (password will be hashed by model pre-save hook)
+    const user = await User.create({
       name,
-      email,
-      hashedPassword,
-      role || "user",
-      phone
-    );
+      email: email.toLowerCase(),
+      password,
+      role: role || "user",
+      phone: phone || undefined,
+      address: address || undefined,
+    });
 
     // Generate JWT token
-    const token = jwt.sign(
-      { id: userId, email, role: role || "user" },
-      process.env.JWT_SECRET || "your_secret_key",
-      { expiresIn: process.env.JWT_EXPIRY || "24h" }
-    );
+    const token = generateToken({
+      id: user._id,
+      email: user.email,
+      role: user.role,
+    });
 
     res.status(201).json({
       success: true,
       message: "User registered successfully",
       token,
       user: {
-        id: userId,
-        name,
-        email,
-        phone,
-        role: role || "user",
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        phone: user.phone,
+        address: user.address,
       },
     });
   } catch (error) {
@@ -79,8 +93,11 @@ exports.login = async (req, res) => {
       });
     }
 
-    // Find user by email
-    const user = await User.findByEmail(email);
+    // Find user by email (include password field)
+    const user = await User.findOne({ email: email.toLowerCase() }).select(
+      "+password"
+    );
+
     if (!user) {
       return res.status(401).json({
         success: false,
@@ -88,8 +105,8 @@ exports.login = async (req, res) => {
       });
     }
 
-    // Compare passwords
-    const isPasswordValid = await bcrypt.compare(password, user.password_hash);
+    // Compare passwords using model method
+    const isPasswordValid = await user.comparePassword(password);
     if (!isPasswordValid) {
       return res.status(401).json({
         success: false,
@@ -98,21 +115,23 @@ exports.login = async (req, res) => {
     }
 
     // Generate JWT token
-    const token = jwt.sign(
-      { id: user.id, email: user.email, role: user.role },
-      process.env.JWT_SECRET || "your_secret_key",
-      { expiresIn: process.env.JWT_EXPIRY || "24h" }
-    );
+    const token = generateToken({
+      id: user._id,
+      email: user.email,
+      role: user.role,
+    });
 
     res.status(200).json({
       success: true,
       message: "Login successful",
       token,
       user: {
-        id: user.id,
+        id: user._id,
         name: user.name,
         email: user.email,
         role: user.role,
+        phone: user.phone,
+        address: user.address,
       },
     });
   } catch (error) {
@@ -141,11 +160,12 @@ exports.getCurrentUser = async (req, res) => {
     res.status(200).json({
       success: true,
       user: {
-        id: user.id,
+        id: user._id,
         name: user.name,
         email: user.email,
-        phone: user.phone,
         role: user.role,
+        phone: user.phone,
+        address: user.address,
       },
     });
   } catch (error) {
@@ -172,8 +192,16 @@ exports.changePassword = async (req, res) => {
       });
     }
 
-    // Find user
-    const user = await User.findById(userId);
+    // Validate new password length
+    if (newPassword.length < 6) {
+      return res.status(400).json({
+        success: false,
+        message: "New password must be at least 6 characters",
+      });
+    }
+
+    // Find user with password
+    const user = await User.findById(userId).select("+password");
     if (!user) {
       return res.status(404).json({
         success: false,
@@ -182,10 +210,7 @@ exports.changePassword = async (req, res) => {
     }
 
     // Verify current password
-    const isPasswordValid = await bcrypt.compare(
-      currentPassword,
-      user.password_hash
-    );
+    const isPasswordValid = await user.comparePassword(currentPassword);
     if (!isPasswordValid) {
       return res.status(401).json({
         success: false,
@@ -193,14 +218,9 @@ exports.changePassword = async (req, res) => {
       });
     }
 
-    // Hash new password
-    const hashedPassword = await bcrypt.hash(newPassword, 10);
-
-    // Update password (you'll need to add this method to User model)
-    const updated = await User.update(userId, user.name, user.email, user.role);
-
-    // Note: This is incomplete - you need to extend User.update() to handle password changes
-    // Or create a separate updatePassword method in the User model
+    // Update password (will be hashed by pre-save hook)
+    user.password = newPassword;
+    await user.save();
 
     res.status(200).json({
       success: true,
@@ -211,6 +231,195 @@ exports.changePassword = async (req, res) => {
     res.status(500).json({
       success: false,
       message: "Error changing password",
+      error: error.message,
+    });
+  }
+};
+
+// Get all users (Admin only)
+exports.getAllUsers = async (req, res) => {
+  try {
+    const users = await User.find().select("-password");
+
+    res.status(200).json({
+      success: true,
+      count: users.length,
+      users: users.map((user) => ({
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        createdAt: user.createdAt,
+      })),
+    });
+  } catch (error) {
+    console.error("Get all users error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Error fetching users",
+      error: error.message,
+    });
+  }
+};
+
+// Get user by ID (Admin only)
+exports.getUserById = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const user = await User.findById(id).select("-password");
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found",
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        phone: user.phone,
+        createdAt: user.createdAt,
+        updatedAt: user.updatedAt,
+      },
+    });
+  } catch (error) {
+    console.error("Get user by ID error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Error fetching user",
+      error: error.message,
+    });
+  }
+};
+
+// Update a user (Admin only)
+exports.updateUser = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { name, role } = req.body;
+
+    // Prevent admin from changing their own role
+    if (role && req.user.id === id) {
+      return res.status(400).json({
+        success: false,
+        message: "Admins cannot change their own role",
+      });
+    }
+
+    // Validate role if provided
+    if (role && !["admin", "user", "delivery"].includes(role)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid role. Must be 'admin', 'user', or 'delivery'",
+      });
+    }
+
+    const update = {};
+    if (typeof name === "string" && name.trim().length > 0) update.name = name;
+    if (role) update.role = role;
+
+    const user = await User.findByIdAndUpdate(id, update, {
+      new: true,
+      runValidators: true,
+      select: "-password",
+    });
+
+    if (!user) {
+      return res
+        .status(404)
+        .json({ success: false, message: "User not found" });
+    }
+
+    res.status(200).json({
+      success: true,
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        createdAt: user.createdAt,
+      },
+    });
+  } catch (error) {
+    console.error("Update user error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Error updating user",
+      error: error.message,
+    });
+  }
+};
+
+// Delete a user (Admin only)
+exports.deleteUser = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // Prevent admin from deleting self
+    if (req.user.id === id) {
+      return res.status(400).json({
+        success: false,
+        message: "Admins cannot delete their own account",
+      });
+    }
+
+    const user = await User.findByIdAndDelete(id);
+    if (!user) {
+      return res
+        .status(404)
+        .json({ success: false, message: "User not found" });
+    }
+
+    res
+      .status(200)
+      .json({ success: true, message: "User deleted successfully" });
+  } catch (error) {
+    console.error("Delete user error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Error deleting user",
+      error: error.message,
+    });
+  }
+};
+
+// Reset a user's password (Admin only)
+exports.resetUserPassword = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { newPassword } = req.body;
+
+    if (!newPassword || newPassword.length < 6) {
+      return res.status(400).json({
+        success: false,
+        message: "New password must be at least 6 characters",
+      });
+    }
+
+    const user = await User.findById(id).select("+password");
+    if (!user) {
+      return res
+        .status(404)
+        .json({ success: false, message: "User not found" });
+    }
+
+    user.password = newPassword; // Will be hashed by pre-save hook
+    await user.save();
+
+    res
+      .status(200)
+      .json({ success: true, message: "Password reset successfully" });
+  } catch (error) {
+    console.error("Reset user password error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Error resetting password",
       error: error.message,
     });
   }

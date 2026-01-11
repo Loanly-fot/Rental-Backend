@@ -4,21 +4,23 @@ const { verifyToken, verifyAdmin } = require("../middleware/authMiddleware");
 
 const router = express.Router();
 
-// Public routes (read-only)
+// Public/Protected routes
 router.get("/", equipmentController.getAll);
-router.get("/categories", equipmentController.getCategories);
 router.get("/:id", equipmentController.getById);
-router.get("/category/:category", equipmentController.getByCategory);
 
-// Protected routes (admin only)
-router.post("/", verifyToken, verifyAdmin, equipmentController.create);
-router.put("/:id", verifyToken, verifyAdmin, equipmentController.update);
-router.put(
-  "/:id/availability",
+// Protected routes (Admin/User can create)
+router.post("/", verifyToken, equipmentController.create);
+
+// Update: Owner or Admin
+router.put("/:id", verifyToken, equipmentController.update);
+
+// Admin-only routes
+router.delete("/:id", verifyToken, verifyAdmin, equipmentController.delete);
+router.post(
+  "/:id/approve",
   verifyToken,
   verifyAdmin,
-  equipmentController.updateAvailableQty
+  equipmentController.approve
 );
-router.delete("/:id", verifyToken, verifyAdmin, equipmentController.delete);
 
 module.exports = router;

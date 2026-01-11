@@ -1,79 +1,53 @@
 const Equipment = require("../models/Equipment");
 const Log = require("../models/Log");
+const {
+  saveBase64Image,
+  deleteImage,
+  isBase64Image,
+} = require("../utils/imageHandler");
 
-// Create equipment
-exports.create = async (req, res) => {
-  try {
-    const { name, description, category, dailyRate, quantity, available } =
-      req.body;
-
-    // Validate input
-    if (
-      !name ||
-      !category ||
-      quantity === undefined ||
-      available === undefined
-    ) {
-      return res.status(400).json({
-        success: false,
-        message: "Name, category, quantity, and available are required",
-      });
-    }
-
-    // Validate quantities
-    if (available > quantity) {
-      return res.status(400).json({
-        success: false,
-        message: "Available quantity cannot exceed total quantity",
-      });
-    }
-
-    // Create equipment
-    const equipmentId = await Equipment.create(
-      name,
-      description || "",
-      category,
-      dailyRate || 0,
-      quantity,
-      available
-    );
-
-    // Log action
-    await Log.create(req.user?.id || null, `Created equipment: ${name}`);
-
-    res.status(201).json({
-      success: true,
-      message: "Equipment created successfully",
-      equipmentId,
-      equipment: {
-        id: equipmentId,
-        name,
-        description,
-        category,
-        dailyRate,
-        quantity,
-        available,
-      },
-    });
-  } catch (error) {
-    console.error("Create equipment error:", error);
-    res.status(500).json({
-      success: false,
-      message: "Error creating equipment",
-      error: error.message,
-    });
-  }
-};
-
-// Get all equipment
+// Get all equipment (with filtering)
 exports.getAll = async (req, res) => {
   try {
-    const equipment = await Equipment.findAll();
+    const { status, category } = req.query;
+    const filter = {};
+
+    // Filter by status if provided
+    if (status) {
+      filter.status = status;
+    }
+
+    // Filter by category if provided
+    if (category) {
+      filter.category = category;
+    }
+
+    const equipment = await Equipment.find(filter)
+      .populate("createdBy", "name email")
+      .populate("approvedBy", "name")
+      .sort({ createdAt: -1 });
 
     res.status(200).json({
       success: true,
       count: equipment.length,
-      equipment,
+      equipment: equipment.map((item) => ({
+        id: item._id,
+        name: item.name,
+        category: item.category,
+        description: item.description,
+        quantity: item.quantity,
+        dailyRate: item.dailyRate,
+        status: item.status,
+        approved: item.approved,
+        image: item.image,
+        createdBy: item.createdBy
+          ? {
+              id: item.createdBy._id,
+              name: item.createdBy.name,
+            }
+          : null,
+        createdAt: item.createdAt,
+      })),
     });
   } catch (error) {
     console.error("Get all equipment error:", error);
@@ -90,15 +64,9 @@ exports.getById = async (req, res) => {
   try {
     const { id } = req.params;
 
-    // Validate ID
-    if (!id) {
-      return res.status(400).json({
-        success: false,
-        message: "Equipment ID is required",
-      });
-    }
-
-    const equipment = await Equipment.findById(id);
+    const equipment = await Equipment.findById(id)
+      .populate("createdBy", "name email")
+      .populate("approvedBy", "name");
 
     if (!equipment) {
       return res.status(404).json({
@@ -109,7 +77,33 @@ exports.getById = async (req, res) => {
 
     res.status(200).json({
       success: true,
-      equipment,
+      equipment: {
+        id: equipment._id,
+        name: equipment.name,
+        category: equipment.category,
+        description: equipment.description,
+        quantity: equipment.quantity,
+        dailyRate: equipment.dailyRate,
+        status: equipment.status,
+        approved: equipment.approved,
+        approvalNotes: equipment.approvalNotes,
+        image: equipment.image,
+        createdBy: equipment.createdBy
+          ? {
+              id: equipment.createdBy._id,
+              name: equipment.createdBy.name,
+              email: equipment.createdBy.email,
+            }
+          : null,
+        approvedBy: equipment.approvedBy
+          ? {
+              id: equipment.approvedBy._id,
+              name: equipment.approvedBy.name,
+            }
+          : null,
+        createdAt: equipment.createdAt,
+        updatedAt: equipment.updatedAt,
+      },
     });
   } catch (error) {
     console.error("Get equipment by ID error:", error);
@@ -121,74 +115,100 @@ exports.getById = async (req, res) => {
   }
 };
 
-// Get equipment by category
-exports.getByCategory = async (req, res) => {
+// Create equipment (Admin/User)
+exports.create = async (req, res) => {
   try {
-    const { category } = req.params;
+    const { name, category, quantity, status, description, dailyRate, image } =
+      req.body;
+    const userId = req.user.id;
+    const userRole = req.user.role;
 
-    // Validate category
-    if (!category) {
+    // Validate required fields
+    if (!name || !category || quantity === undefined) {
       return res.status(400).json({
         success: false,
-        message: "Category is required",
+        message: "Name, category, and quantity are required",
       });
     }
 
-    const equipment = await Equipment.findByCategory(category);
+    // Validate quantity
+    if (quantity < 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Quantity cannot be negative",
+      });
+    }
 
-    res.status(200).json({
+    // Create equipment object
+    const equipmentData = {
+      name,
+      category,
+      quantity,
+      description: description || "",
+      dailyRate: dailyRate || 0,
+      status: status || "available",
+      createdBy: userId,
+    };
+
+    // Handle image upload (if base64 provided)
+    if (image && isBase64Image(image)) {
+      try {
+        const filename = await saveBase64Image(image, "equipments");
+        equipmentData.image = filename;
+      } catch (err) {
+        console.error("Image save error:", err);
+        // Continue without image if upload fails
+      }
+    }
+
+    // Auto-approve if admin creates it
+    if (userRole === "admin") {
+      equipmentData.approved = true;
+      equipmentData.approvedBy = userId;
+    }
+
+    const equipment = await Equipment.create(equipmentData);
+
+    // Log action
+    await Log.create({
+      userId,
+      action: `Created equipment: ${name}`,
+    });
+
+    res.status(201).json({
       success: true,
-      count: equipment.length,
-      equipment,
+      message: "Equipment created successfully",
+      equipment: {
+        id: equipment._id,
+        name: equipment.name,
+        category: equipment.category,
+        quantity: equipment.quantity,
+        status: equipment.status,
+        approved: equipment.approved,
+        image: equipment.image,
+      },
     });
   } catch (error) {
-    console.error("Get equipment by category error:", error);
+    console.error("Create equipment error:", error);
     res.status(500).json({
       success: false,
-      message: "Error fetching equipment",
+      message: "Error creating equipment",
       error: error.message,
     });
   }
 };
 
-// Update equipment
+// Update equipment (Admin or Owner)
 exports.update = async (req, res) => {
   try {
     const { id } = req.params;
-    const { name, description, category, dailyRate, quantity, available } =
+    const { name, category, quantity, status, description, dailyRate, image } =
       req.body;
+    const userId = req.user.id;
+    const userRole = req.user.role;
 
-    // Validate ID
-    if (!id) {
-      return res.status(400).json({
-        success: false,
-        message: "Equipment ID is required",
-      });
-    }
-
-    // Validate input
-    if (
-      !name ||
-      !category ||
-      quantity === undefined ||
-      available === undefined
-    ) {
-      return res.status(400).json({
-        success: false,
-        message: "Name, category, quantity, and available are required",
-      });
-    }
-
-    // Validate quantities
-    if (available > quantity) {
-      return res.status(400).json({
-        success: false,
-        message: "Available quantity cannot exceed total quantity",
-      });
-    }
-
-    // Check if equipment exists
     const equipment = await Equipment.findById(id);
+
     if (!equipment) {
       return res.status(404).json({
         success: false,
@@ -196,38 +216,56 @@ exports.update = async (req, res) => {
       });
     }
 
-    // Update equipment
-    const updated = await Equipment.update(
-      id,
-      name,
-      description || "",
-      category,
-      dailyRate || 0,
-      quantity,
-      available
-    );
-
-    if (!updated) {
-      return res.status(400).json({
+    // Check ownership: user can only update their own equipment, admin can update any
+    if (userRole !== "admin" && equipment.createdBy?.toString() !== userId) {
+      return res.status(403).json({
         success: false,
-        message: "Failed to update equipment",
+        message: "You can only update equipment you created",
       });
     }
 
+    // Handle image update
+    if (image && isBase64Image(image)) {
+      try {
+        // Delete old image if exists
+        if (equipment.image) {
+          await deleteImage(equipment.image, "equipments");
+        }
+        // Save new image
+        const filename = await saveBase64Image(image, "equipments");
+        equipment.image = filename;
+      } catch (err) {
+        console.error("Image update error:", err);
+        // Continue without image update if fails
+      }
+    }
+
+    // Update fields
+    if (name) equipment.name = name;
+    if (category) equipment.category = category;
+    if (quantity !== undefined) equipment.quantity = quantity;
+    if (status) equipment.status = status;
+    if (description !== undefined) equipment.description = description;
+    if (dailyRate !== undefined) equipment.dailyRate = dailyRate;
+
+    await equipment.save();
+
     // Log action
-    await Log.create(req.user?.id || null, `Updated equipment: ${name}`);
+    await Log.create({
+      userId,
+      action: `Updated equipment: ${equipment.name}`,
+    });
 
     res.status(200).json({
       success: true,
       message: "Equipment updated successfully",
       equipment: {
-        id,
-        name,
-        description,
-        category,
-        dailyRate,
-        quantity,
-        available,
+        id: equipment._id,
+        name: equipment.name,
+        category: equipment.category,
+        quantity: equipment.quantity,
+        status: equipment.status,
+        image: equipment.image,
       },
     });
   } catch (error) {
@@ -240,21 +278,14 @@ exports.update = async (req, res) => {
   }
 };
 
-// Delete equipment
+// Delete equipment (Admin only)
 exports.delete = async (req, res) => {
   try {
     const { id } = req.params;
+    const userId = req.user.id;
 
-    // Validate ID
-    if (!id) {
-      return res.status(400).json({
-        success: false,
-        message: "Equipment ID is required",
-      });
-    }
-
-    // Check if equipment exists
     const equipment = await Equipment.findById(id);
+
     if (!equipment) {
       return res.status(404).json({
         success: false,
@@ -262,21 +293,14 @@ exports.delete = async (req, res) => {
       });
     }
 
-    // Delete equipment
-    const deleted = await Equipment.delete(id);
-
-    if (!deleted) {
-      return res.status(400).json({
-        success: false,
-        message: "Failed to delete equipment",
-      });
-    }
+    const equipmentName = equipment.name;
+    await Equipment.findByIdAndDelete(id);
 
     // Log action
-    await Log.create(
-      req.user?.id || null,
-      `Deleted equipment: ${equipment.name}`
-    );
+    await Log.create({
+      userId,
+      action: `Deleted equipment: ${equipmentName}`,
+    });
 
     res.status(200).json({
       success: true,
@@ -292,50 +316,15 @@ exports.delete = async (req, res) => {
   }
 };
 
-// Get all categories
-exports.getCategories = async (req, res) => {
-  try {
-    const categories = await Equipment.getCategories();
-
-    res.status(200).json({
-      success: true,
-      count: categories.length,
-      categories: categories.map((cat) => cat.category),
-    });
-  } catch (error) {
-    console.error("Get categories error:", error);
-    res.status(500).json({
-      success: false,
-      message: "Error fetching categories",
-      error: error.message,
-    });
-  }
-};
-
-// Update available quantity
-exports.updateAvailableQty = async (req, res) => {
+// Approve equipment (Admin only)
+exports.approve = async (req, res) => {
   try {
     const { id } = req.params;
-    const { qty_available } = req.body;
+    const userId = req.user.id;
+    const { notes } = req.body;
 
-    // Validate ID
-    if (!id) {
-      return res.status(400).json({
-        success: false,
-        message: "Equipment ID is required",
-      });
-    }
-
-    // Validate quantity
-    if (qty_available === undefined) {
-      return res.status(400).json({
-        success: false,
-        message: "Available quantity is required",
-      });
-    }
-
-    // Check if equipment exists
     const equipment = await Equipment.findById(id);
+
     if (!equipment) {
       return res.status(404).json({
         success: false,
@@ -343,44 +332,34 @@ exports.updateAvailableQty = async (req, res) => {
       });
     }
 
-    // Validate quantity doesn't exceed total
-    if (qty_available > equipment.qty_total) {
-      return res.status(400).json({
-        success: false,
-        message: "Available quantity cannot exceed total quantity",
-      });
+    equipment.approved = true;
+    equipment.approvedBy = userId;
+    if (notes) {
+      equipment.approvalNotes = notes;
     }
 
-    // Update available quantity
-    const updated = await Equipment.updateAvailableQty(id, qty_available);
-
-    if (!updated) {
-      return res.status(400).json({
-        success: false,
-        message: "Failed to update available quantity",
-      });
-    }
+    await equipment.save();
 
     // Log action
-    await Log.create(
-      req.user?.id || null,
-      `Updated quantity for equipment ID: ${id} to ${qty_available}`
-    );
+    await Log.create({
+      userId,
+      action: `Approved equipment: ${equipment.name}`,
+    });
 
     res.status(200).json({
       success: true,
-      message: "Available quantity updated successfully",
+      message: "Equipment approved successfully",
       equipment: {
-        id,
+        id: equipment._id,
         name: equipment.name,
-        qty_available,
+        approved: equipment.approved,
       },
     });
   } catch (error) {
-    console.error("Update available quantity error:", error);
+    console.error("Approve equipment error:", error);
     res.status(500).json({
       success: false,
-      message: "Error updating available quantity",
+      message: "Error approving equipment",
       error: error.message,
     });
   }
