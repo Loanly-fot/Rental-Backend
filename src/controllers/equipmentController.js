@@ -123,27 +123,36 @@ exports.create = async (req, res) => {
     const userId = req.user.id;
     const userRole = req.user.role;
 
-    // Validate required fields
-    if (!name || !category || quantity === undefined) {
+    // Validate required fields - check for null/undefined, not for 0
+    if (!name || !name.trim() || !category) {
       return res.status(400).json({
         success: false,
-        message: "Name, category, and quantity are required",
+        message: "Name and category are required",
       });
     }
 
-    // Validate quantity
-    if (quantity < 0) {
+    // Validate quantity is provided (0 is valid)
+    if (quantity === null || quantity === undefined || quantity === "") {
       return res.status(400).json({
         success: false,
-        message: "Quantity cannot be negative",
+        message: "Quantity is required",
+      });
+    }
+
+    // Validate quantity is a number
+    const qty = Number(quantity);
+    if (isNaN(qty) || qty < 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Quantity must be a non-negative number",
       });
     }
 
     // Create equipment object
     const equipmentData = {
-      name,
+      name: name.trim(),
       category,
-      quantity,
+      quantity: qty,
       description: description || "",
       dailyRate: dailyRate || 0,
       status: status || "available",
